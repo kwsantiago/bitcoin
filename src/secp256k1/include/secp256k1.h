@@ -425,7 +425,8 @@ SECP256K1_API SECP256K1_WARN_UNUSED_RESULT int secp256k1_ecdsa_verify(
     const secp256k1_context* ctx,
     const secp256k1_ecdsa_signature *sig,
     const unsigned char *msg32,
-    const secp256k1_pubkey *pubkey
+    const secp256k1_pubkey *pubkey,
+    const unsigned char *hint
 ) SECP256K1_ARG_NONNULL(1) SECP256K1_ARG_NONNULL(2) SECP256K1_ARG_NONNULL(3) SECP256K1_ARG_NONNULL(4);
 
 /** Convert a signature to a normalized lower-S form.
