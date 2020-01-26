@@ -240,7 +240,9 @@ bool CKey::VerifyPubKey(const CPubKey& pubkey) const {
     CHash256().Write((unsigned char*)str.data(), str.size()).Write(rnd, sizeof(rnd)).Finalize(hash.begin());
     std::vector<unsigned char> vchSig;
     Sign(hash, vchSig);
-    return pubkey.Verify(hash, vchSig);
+    
+    const unsigned char *hint = (const unsigned char *)(str.c_str());
+    return pubkey.Verify(hash, vchSig, hint);
 }
 
 bool CKey::SignCompact(const uint256 &hash, std::vector<unsigned char>& vchSig) const {
