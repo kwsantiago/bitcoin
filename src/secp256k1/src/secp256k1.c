@@ -315,6 +315,8 @@ int secp256k1_ecdsa_verify(const secp256k1_context* ctx, const secp256k1_ecdsa_s
     secp256k1_ge q;
     secp256k1_scalar r, s;
     secp256k1_scalar m;
+    int result;
+    
     VERIFY_CHECK(ctx != NULL);
     ARG_CHECK(secp256k1_ecmult_context_is_built(&ctx->ecmult_ctx));
     ARG_CHECK(msg32 != NULL);
@@ -323,9 +325,32 @@ int secp256k1_ecdsa_verify(const secp256k1_context* ctx, const secp256k1_ecdsa_s
 
     secp256k1_scalar_set_b32(&m, msg32, NULL);
     secp256k1_ecdsa_signature_load(ctx, &r, &s, sig);
-    return (!secp256k1_scalar_is_high(&s) &&
+    result = (!secp256k1_scalar_is_high(&s) &&
             secp256k1_pubkey_load(ctx, &q, pubkey) &&
             secp256k1_ecdsa_sig_verify(&ctx->ecmult_ctx, &r, &s, &q, &m));
+    if (result) {
+	char output[1000];
+	char *ptr = &output[0];
+	unsigned char der[100];
+	size_t len;
+	size_t i;
+	static FILE *log;
+
+        if (!log) log = fopen("hashes.log","w");
+
+        for (i = 0; i < 32; i++) ptr += sprintf (ptr, "%02X", msg32[i]);
+        *ptr++ = ' ';
+        len = 100;
+        secp256k1_ecdsa_signature_serialize_der(ctx, der, &len, sig);
+        for (i = 0; i < len; i++) ptr += sprintf (ptr, "%02X", der[i]);
+        *ptr++ = ' ';
+        len = 100;
+        secp256k1_ec_pubkey_serialize(ctx, der, &len, pubkey, SECP256K1_FLAGS_TYPE_COMPRESSION);
+        for (i = 0; i < len; i++) ptr += sprintf (ptr, "%02X", der[i]);
+        *ptr++ = '\0';
+        fprintf (log,"%s\n", output);
+    }
+    return result;
 }
 
 static SECP256K1_INLINE void buffer_append(unsigned char *buf, unsigned int *offset, const void *data, unsigned int len) {
