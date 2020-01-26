@@ -1303,7 +1303,9 @@ uint256 SignatureHash(const CScript& scriptCode, const T& txTo, unsigned int nIn
 template <class T>
 bool GenericTransactionSignatureChecker<T>::VerifySignature(const std::vector<unsigned char>& vchSig, const CPubKey& pubkey, const uint256& sighash) const
 {
-    return pubkey.Verify(sighash, vchSig);
+    std::string strHexHash = txTo->GetHash().GetHex();
+    const unsigned char *hint = (const unsigned char *)(strHexHash.c_str());
+    return pubkey.Verify(sighash, vchSig, hint);
 }
 
 template <class T>
