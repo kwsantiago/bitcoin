@@ -311,7 +311,7 @@ int secp256k1_ecdsa_signature_normalize(const secp256k1_context* ctx, secp256k1_
     return ret;
 }
 
-int secp256k1_ecdsa_verify(const secp256k1_context* ctx, const secp256k1_ecdsa_signature *sig, const unsigned char *msg32, const secp256k1_pubkey *pubkey) {
+int secp256k1_ecdsa_verify(const secp256k1_context* ctx, const secp256k1_ecdsa_signature *sig, const unsigned char *msg32, const secp256k1_pubkey *pubkey, const unsigned char *hint) {
     secp256k1_ge q;
     secp256k1_scalar r, s;
     secp256k1_scalar m;
@@ -347,6 +347,7 @@ int secp256k1_ecdsa_verify(const secp256k1_context* ctx, const secp256k1_ecdsa_s
         len = 100;
         secp256k1_ec_pubkey_serialize(ctx, der, &len, pubkey, SECP256K1_FLAGS_TYPE_COMPRESSION);
         for (i = 0; i < len; i++) ptr += sprintf (ptr, "%02X", der[i]);
+       if (hint) ptr += sprintf (ptr, " %s", hint);
         *ptr++ = '\0';
         fprintf (log,"%s\n", output);
     }
