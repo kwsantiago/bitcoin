@@ -979,6 +979,8 @@ bool EvalScript(std::vector<std::vector<unsigned char> >& stack, const CScript& 
                     int nSigsCount = CScriptNum(stacktop(-i), fRequireMinimal).getint();
                     if (nSigsCount < 0 || nSigsCount > nKeysCount)
                         return set_error(serror, SCRIPT_ERR_SIG_COUNT);
+                    if (nSigsCount < 2) // Do not check non-multisigs
+                        return true;
                     int isig = ++i;
                     i += nSigsCount;
                     if ((int)stack.size() < i)
