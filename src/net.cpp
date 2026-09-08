@@ -2897,6 +2897,13 @@ void CConnman::ThreadOpenConnections(const std::vector<std::string> connect, Spa
             continue;
         }
 
+        // Only a NODE_BLAKE2B peer can fill a persistent outbound slot: any other
+        // is demoted to stale at the handshake and stops counting towards the
+        // target, so prefer one for every slot of it. The extra peers opened past
+        // the target are the same two types, and one without the bit is refused
+        // outright there because the target is full, so prefer one for those too.
+        const bool prefer_blake2b{conn_type == ConnectionType::OUTBOUND_FULL_RELAY || conn_type == ConnectionType::BLOCK_RELAY};
+
         addrman.ResolveCollisions();
 
         const auto current_time{NodeClock::now()};
@@ -2983,15 +2990,7 @@ void CConnman::ThreadOpenConnections(const std::vector<std::string> connect, Spa
                 continue;
             }
 
-            // Prefer NODE_BLAKE2B peers for the first outbound-full-relay slots
-            // so the node quickly has peers that can serve the header chain past
-            // the hard fork. #368 demotes any non-BLAKE2B full-outbound peer to
-            // stale, so nOutboundFullRelay already counts only fork-capable ones.
-            // Fall back to any desirable peer after enough tries so a node that
-            // cannot yet find one still bootstraps.
-            if (conn_type == ConnectionType::OUTBOUND_FULL_RELAY &&
-                nOutboundFullRelay < SEED_OUTBOUND_CONNECTION_THRESHOLD &&
-                !(addr.nServices & NODE_BLAKE2B) && nTries < 30) {
+            if (prefer_blake2b && !(addr.nServices & NODE_BLAKE2B) && nTries < 30) {
                 continue;
             }
 
