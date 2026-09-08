@@ -1070,6 +1070,12 @@ public:
     virtual bool HasAllDesirableServiceFlags(ServiceFlags services) const = 0;
 
     /**
+     * Callback to determine whether one more outbound peer of this type that
+     * lacks NODE_BLAKE2B would be kept rather than dropped at the handshake.
+     */
+    virtual bool CanTolerateStaleOutbound(ConnectionType conn_type) const = 0;
+
+    /**
     * Process protocol messages received from a given node
     *
     * @param[in]   pnode           The node which we have received messages from.
@@ -1260,6 +1266,10 @@ public:
     int GetExtraFullOutboundCount() const;
     // Count the number of block-relay-only peers we have over our limit.
     int GetExtraBlockRelayCount() const;
+
+    /** NetEventsInterface::CanTolerateStaleOutbound, given the -maxstaleoutbound
+     *  budget the caller enforces. */
+    bool CanTolerateStaleOutbound(ConnectionType conn_type, unsigned int max_stale) const EXCLUSIVE_LOCKS_REQUIRED(!m_nodes_mutex);
 
     /** Demote an outbound peer that did not advertise NODE_BLAKE2B to an
      *  additional connection: give up its automatic outbound semaphore slot (so

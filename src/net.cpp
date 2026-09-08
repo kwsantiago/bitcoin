@@ -2594,6 +2594,12 @@ CConnman::StaleOutboundRoom CConnman::CheckStaleOutboundRoom(ConnectionType conn
     return room;
 }
 
+bool CConnman::CanTolerateStaleOutbound(ConnectionType conn_type, unsigned int max_stale) const
+{
+    LOCK(m_nodes_mutex);
+    return !CheckStaleOutboundRoom(conn_type, max_stale, /*exclude=*/nullptr).refusal.has_value();
+}
+
 bool CConnman::DemoteToStaleOutbound(CNode& node, unsigned int max_stale)
 {
     // The version handler rejects a redundant VERSION before the stale gate, so
@@ -2903,6 +2909,11 @@ void CConnman::ThreadOpenConnections(const std::vector<std::string> connect, Spa
         // the target are the same two types, and one without the bit is refused
         // outright there because the target is full, so prefer one for those too.
         const bool prefer_blake2b{conn_type == ConnectionType::OUTBOUND_FULL_RELAY || conn_type == ConnectionType::BLOCK_RELAY};
+        // Falling back to a peer without it after enough tries is what bootstraps
+        // a node that can find none, but that only helps while the peer would be
+        // kept: once it would be dropped at the handshake instead, we would
+        // reconnect to the network twice a second for nothing.
+        const bool blake2b_required{prefer_blake2b && !m_msgproc->CanTolerateStaleOutbound(conn_type)};
 
         addrman.ResolveCollisions();
 
@@ -2976,8 +2987,11 @@ void CConnman::ThreadOpenConnections(const std::vector<std::string> connect, Spa
                 continue;
             }
 
-            // only consider very recently tried nodes after 30 failed attempts
-            if (current_time - addr_last_try < 10min && nTries < 30) {
+            // only consider very recently tried nodes after 30 failed attempts,
+            // unless we need NODE_BLAKE2B: an address that claims it but never
+            // completes a handshake is never corrected by SetServices, so
+            // relaxing this would re-dial it every pass
+            if (current_time - addr_last_try < 10min && (nTries < 30 || blake2b_required)) {
                 continue;
             }
 
@@ -2990,7 +3004,7 @@ void CConnman::ThreadOpenConnections(const std::vector<std::string> connect, Spa
                 continue;
             }
 
-            if (prefer_blake2b && !(addr.nServices & NODE_BLAKE2B) && nTries < 30) {
+            if (prefer_blake2b && !(addr.nServices & NODE_BLAKE2B) && (nTries < 30 || blake2b_required)) {
                 continue;
             }
 
