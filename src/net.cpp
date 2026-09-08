@@ -2552,69 +2552,68 @@ int CConnman::GetExtraBlockRelayCount() const
     return std::max(block_relay_peers - m_max_outbound_block_relay, 0);
 }
 
+CConnman::StaleOutboundRoom CConnman::CheckStaleOutboundRoom(ConnectionType conn_type, unsigned int max_stale, const CNode* exclude) const
+{
+    AssertLockHeld(m_nodes_mutex);
+    // The stale count is derived from the flag rather than kept in a separate
+    // counter, so it can never drift out of sync with the connections it
+    // describes. num_stale is unsigned to match max_stale (-maxstaleoutbound);
+    // inbound_equiv is int to match m_max_inbound, so neither comparison trips
+    // -Wsign-compare.
+    StaleOutboundRoom room;
+    int inbound_equiv{0};
+    int same_target{0};
+    for (const CNode* pnode : m_nodes) {
+        if (pnode == exclude || pnode->fDisconnect) continue;
+        // A demoted stale peer draws on the inbound budget, like a real inbound.
+        if (pnode->m_is_stale_outbound) {
+            ++room.num_stale;
+            ++inbound_equiv;
+        } else if (pnode->IsInboundConn()) {
+            ++inbound_equiv;
+        }
+        // Peers filling this outbound target, preferred or stale alike: a demoted
+        // peer keeps its connection type.
+        if (pnode->m_conn_type == conn_type) ++same_target;
+    }
+    Assume(conn_type == ConnectionType::OUTBOUND_FULL_RELAY || conn_type == ConnectionType::BLOCK_RELAY);
+    const int max_same_target{conn_type == ConnectionType::OUTBOUND_FULL_RELAY ? m_max_outbound_full_relay : m_max_outbound_block_relay};
+    if (room.num_stale >= max_stale) {
+        room.refusal = strprintf("already have %u stale outbound peers (limit %u)", room.num_stale, max_stale);
+    } else if (same_target >= max_same_target) {
+        // Tolerating a stale peer is only worthwhile while it fills a gap in the
+        // outbound target. Once that target is met, by preferred peers, already
+        // tolerated stale ones, or a mix, another stale peer buys us nothing.
+        room.refusal = strprintf("the outbound target is already full (%d/%d)", same_target, max_same_target);
+    } else if (inbound_equiv >= m_max_inbound) {
+        // Demoting releases the outbound slot, which we then refill toward the
+        // outbound target, so the peer must fit the inbound budget or a later
+        // outbound connection would push us past -maxconnections.
+        room.refusal = "no room within -maxconnections";
+    }
+    return room;
+}
+
 bool CConnman::DemoteToStaleOutbound(CNode& node, unsigned int max_stale)
 {
     // The version handler rejects a redundant VERSION before the stale gate, so
     // a peer is never demoted twice; assert that rather than guarding for it.
     Assert(!node.m_is_stale_outbound);
     // m_nodes_mutex guards grantOutbound and m_network_conn_counts, and lets us
-    // count peers without racing the socket handler. The stale count is derived
-    // from the flag here rather than kept in a separate counter, so it can never
-    // drift out of sync with the connections it describes. num_stale is unsigned
-    // to match max_stale (-maxstaleoutbound); inbound_equiv is int to match
-    // m_max_inbound, so neither comparison trips -Wsign-compare.
+    // count peers without racing the socket handler.
     LOCK(m_nodes_mutex);
     if (node.fDisconnect) return false;
-    const ConnectionType conn_type{node.m_conn_type};
-    unsigned int num_stale{0};
-    int inbound_equiv{0};
-    int same_target{0};
-    for (const CNode* pnode : m_nodes) {
-        if (pnode->fDisconnect) continue;
-        // A demoted stale peer draws on the inbound budget, like a real inbound.
-        if (pnode->m_is_stale_outbound) {
-            ++num_stale;
-            ++inbound_equiv;
-        } else if (pnode->IsInboundConn()) {
-            ++inbound_equiv;
-        }
-        // Peers filling this outbound target, preferred or stale alike. A demoted
-        // peer keeps its connection type, so this counts both, and node itself
-        // is still in m_nodes here, so it counts towards its own target too.
-        if (pnode->m_conn_type == conn_type) ++same_target;
-    }
-    if (num_stale >= max_stale) {
-        LogDebug(BCLog::NET, "peer lacks NODE_BLAKE2B and already have %u stale outbound peers (limit %u), %s\n",
-                 num_stale, max_stale, node.DisconnectMsg(fLogIPs));
-        node.fDisconnect = true;
-        return false;
-    }
-    // Tolerating a stale peer is only worthwhile while it fills a gap in the
-    // outbound target. Once that target is met, by preferred peers, already
-    // tolerated stale ones, or a mix, another stale peer buys us nothing.
-    // same_target includes node, so compare with > and report the rest.
-    const int max_same_target{node.IsFullOutboundConn() ? m_max_outbound_full_relay : m_max_outbound_block_relay};
-    if (same_target > max_same_target) {
-        LogDebug(BCLog::NET, "peer lacks NODE_BLAKE2B and the outbound target is already full (%d/%d), %s\n",
-                 same_target - 1, max_same_target, node.DisconnectMsg(fLogIPs));
-        node.fDisconnect = true;
-        return false;
-    }
-    // Demoting releases the outbound slot, which we then refill toward the
-    // outbound target, so the peer must fit the inbound budget or a later
-    // outbound connection would push us past -maxconnections.
-    if (inbound_equiv >= m_max_inbound) {
-        LogDebug(BCLog::NET, "peer lacks NODE_BLAKE2B and no room within -maxconnections, %s\n",
-                 node.DisconnectMsg(fLogIPs));
+    const StaleOutboundRoom room{CheckStaleOutboundRoom(node.m_conn_type, max_stale, &node)};
+    if (room.refusal) {
+        LogDebug(BCLog::NET, "peer lacks NODE_BLAKE2B and %s, %s\n", *room.refusal, node.DisconnectMsg(fLogIPs));
         node.fDisconnect = true;
         return false;
     }
     node.m_is_stale_outbound = true;
     node.grantOutbound.Release();
     if (node.IsManualOrFullOutboundConn()) --m_network_conn_counts[node.addr.GetNetwork()];
-    ++num_stale;
     LogDebug(BCLog::NET, "connected to stale outbound peer (%u/%u), %s\n",
-             num_stale, max_stale, node.ConnectionTypeAsString());
+             room.num_stale + 1, max_stale, node.ConnectionTypeAsString());
     return true;
 }
 

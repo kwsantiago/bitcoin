@@ -1265,12 +1265,10 @@ public:
      *  additional connection: give up its automatic outbound semaphore slot (so
      *  we keep looking for a preferred peer) and stop counting it as our outbound
      *  coverage of its network. A demoted peer draws on the inbound budget, so it
-     *  is kept only while fewer than max_stale are already tolerated, its outbound
-     *  target is not already filled (by preferred or stale peers alike), and the
-     *  inbound budget has room; otherwise this sets fDisconnect and returns false
-     *  without demoting. Does its own logging. Must not be called on an already-
-     *  demoted peer (Assert): the version handler guarantees this by rejecting
-     *  redundant VERSION messages. */
+     *  is kept only while CheckStaleOutboundRoom finds room for it; otherwise this
+     *  sets fDisconnect and returns false without demoting. Does its own logging.
+     *  Must not be called on an already-demoted peer (Assert): the version handler
+     *  guarantees this by rejecting redundant VERSION messages. */
     bool DemoteToStaleOutbound(CNode& node, unsigned int max_stale) EXCLUSIVE_LOCKS_REQUIRED(!m_nodes_mutex);
 
     bool AddNode(const AddedNodeParams& add) EXCLUSIVE_LOCKS_REQUIRED(!m_added_nodes_mutex);
@@ -1364,6 +1362,17 @@ private:
     //! returns the time left in the current max outbound cycle
     //! in case of no limit, it will always return 0
     std::chrono::seconds GetMaxOutboundTimeLeftInCycle_() const EXCLUSIVE_LOCKS_REQUIRED(m_total_bytes_sent_mutex);
+
+    struct StaleOutboundRoom {
+        //! Unset if another stale outbound peer fits, else why not, for logging.
+        std::optional<std::string> refusal;
+        unsigned int num_stale{0};
+    };
+
+    /** Counts that decide whether another stale outbound peer fits.
+     *  `exclude`, when set, is skipped while counting, so a peer that has already
+     *  connected is measured the same way as one that has not. */
+    StaleOutboundRoom CheckStaleOutboundRoom(ConnectionType conn_type, unsigned int max_stale, const CNode* exclude) const EXCLUSIVE_LOCKS_REQUIRED(m_nodes_mutex);
 
     bool BindListenPort(const CService& bindAddr, bilingual_str& strError, NetPermissionFlags permissions);
     bool Bind(const CService& addr, unsigned int flags, NetPermissionFlags permissions);
