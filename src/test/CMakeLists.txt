@@ -81,6 +81,7 @@ add_executable(test_bitcoin
   random_tests.cpp
   rbf_tests.cpp
   rdts_params_tests.cpp
+  rolling_coinbase_maturity_tests.cpp
   rest_tests.cpp
   result_tests.cpp
   reverselock_tests.cpp
