@@ -164,6 +164,7 @@ private:
     // Chain context for the block
     int nHeight;
     int64_t m_lock_time_cutoff;
+    const CBlockIndex* m_rolling_maturity_prev{nullptr};
 
     const CChainParams& chainparams;
     const CTxMemPool* const m_mempool;
@@ -203,15 +204,17 @@ private:
 
     // Methods for how to add transactions to a block.
     /** Add transactions based on tx "priority" */
-    void addPriorityTxs(const CTxMemPool& mempool, int &nPackagesSelected) EXCLUSIVE_LOCKS_REQUIRED(mempool.cs);
+    void addPriorityTxs(const CTxMemPool& mempool, int &nPackagesSelected) EXCLUSIVE_LOCKS_REQUIRED(mempool.cs, ::cs_main);
     /** Add transactions based on feerate including unconfirmed ancestors
       * Increments nPackagesSelected / nDescendantsUpdated with corresponding
       * statistics from the package selection (for logging statistics). */
-    void addPackageTxs(const CTxMemPool& mempool, int& nPackagesSelected, int& nDescendantsUpdated) EXCLUSIVE_LOCKS_REQUIRED(mempool.cs);
+    void addPackageTxs(const CTxMemPool& mempool, int& nPackagesSelected, int& nDescendantsUpdated) EXCLUSIVE_LOCKS_REQUIRED(mempool.cs, ::cs_main);
 
     // helper function for addPriorityTxs
     /** Test if tx will still "fit" in the block */
-    bool TestForBlock(CTxMemPool::txiter iter);
+    bool TestForBlock(CTxMemPool::txiter iter) EXCLUSIVE_LOCKS_REQUIRED(::cs_main);
+    /** Whether the rolling generation maturity permits this entry in a template. */
+    bool RollingMaturityOk(CTxMemPool::txiter iter) const EXCLUSIVE_LOCKS_REQUIRED(::cs_main);
     /** Test if tx still has unconfirmed parents not yet in block */
     bool isStillDependent(const CTxMemPool& mempool, CTxMemPool::txiter iter) EXCLUSIVE_LOCKS_REQUIRED(mempool.cs);
 
@@ -224,7 +227,7 @@ private:
       * locktime, premature-witness, serialized size (if necessary)
       * These checks should always succeed, and they're here
       * only as an extra check in case of suboptimal node configuration */
-    bool TestPackageTransactions(const CTxMemPool::setEntries& package) const;
+    bool TestPackageTransactions(const CTxMemPool::setEntries& package) const EXCLUSIVE_LOCKS_REQUIRED(::cs_main);
     /** Sort the package in an order that is valid to appear in a block */
     void SortForBlock(const CTxMemPool::setEntries& package, std::vector<CTxMemPool::txiter>& sortedEntries);
 };

@@ -184,6 +184,9 @@ std::shared_ptr<CBlockTemplate> BlockAssembler::CreateNewBlock()
 
     pblock->nTime = TicksSinceEpoch<std::chrono::seconds>(NodeClock::now());
     m_lock_time_cutoff = pindexPrev->GetMedianTimePast();
+    m_rolling_maturity_prev = chainparams.GetConsensus().RollingCoinbaseMaturityActiveAt(nHeight, m_lock_time_cutoff)
+                                  ? pindexPrev
+                                  : nullptr;
 
     int nPackagesSelected = 0;
     int nDescendantsUpdated = 0;
@@ -271,14 +274,27 @@ bool BlockAssembler::TestPackage(uint64_t packageSize, int64_t packageSigOpsCost
     return true;
 }
 
+bool BlockAssembler::RollingMaturityOk(CTxMemPool::txiter iter) const
+{
+    AssertLockHeld(::cs_main);
+    if (!m_rolling_maturity_prev || !iter->GetSpendsCoinbase()) return true;
+    TxValidationState dummy;
+    return CheckRollingCoinbaseMaturity(iter->GetTx(), dummy, m_chainstate.CoinsTip(),
+                                        *m_rolling_maturity_prev, chainparams.GetConsensus());
+}
+
 // Perform transaction-level checks before adding to block:
 // - transaction finality (locktime)
 // - serialized size (in case -blockmaxsize is in use)
 bool BlockAssembler::TestPackageTransactions(const CTxMemPool::setEntries& package) const
 {
+    AssertLockHeld(::cs_main);
     uint64_t nPotentialBlockSize = nBlockSize; // only used with fNeedSizeAccounting
     for (CTxMemPool::txiter it : package) {
         if (!IsFinalTx(it->GetTx(), nHeight, m_lock_time_cutoff)) {
+            return false;
+        }
+        if (!RollingMaturityOk(it)) {
             return false;
         }
         if (fNeedSizeAccounting) {

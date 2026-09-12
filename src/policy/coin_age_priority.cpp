@@ -148,6 +148,10 @@ bool BlockAssembler::isStillDependent(const CTxMemPool& mempool, CTxMemPool::txi
 
 bool BlockAssembler::TestForBlock(CTxMemPool::txiter iter)
 {
+    AssertLockHeld(::cs_main);
+    // Checked before TestPackage so a rejected entry cannot trip the
+    // block-full bookkeeping inside TestPackageTransactions.
+    if (!RollingMaturityOk(iter)) return false;
     uint64_t packageSize = iter->GetSizeWithAncestors();
     int64_t packageSigOps = iter->GetSigOpCostWithAncestors();
     if (!TestPackage(packageSize, packageSigOps)) {
