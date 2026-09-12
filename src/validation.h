@@ -350,6 +350,16 @@ bool CheckSequenceLocksAtTip(CBlockIndex* tip,
 void LimitMempoolSize(CTxMemPool&, CCoinsViewCache&);
 
 /**
+ * Rolling generation maturity: every coinbase output `tx` spends must have been
+ * created at least CoinbaseMaturitySeconds earlier, comparing the median-time-past
+ * of the block before the one that created it against that of `spend_prev`, the
+ * parent of the block the transaction would go in.
+ */
+bool CheckRollingCoinbaseMaturity(const CTransaction& tx, TxValidationState& state,
+                                  const CCoinsViewCache& inputs, const CBlockIndex& spend_prev,
+                                  const Consensus::Params& params) EXCLUSIVE_LOCKS_REQUIRED(::cs_main);
+
+/**
  * Closure representing one script verification
  * Note that this stores references to the spending transaction
  */
