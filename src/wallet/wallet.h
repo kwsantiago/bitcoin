@@ -321,6 +321,12 @@ private:
     //! the current wallet version: clients below this version are not able to load the wallet
     int nWalletVersion GUARDED_BY(cs_wallet){FEATURE_BASE};
 
+    /** Cached answer to IsCoinbaseSpendFrozen, keyed on the wallet's tip. A
+     *  block's median-time-past never changes, so this is valid until the tip
+     *  moves. */
+    mutable uint256 m_coinbase_freeze_tip GUARDED_BY(cs_wallet);
+    mutable bool m_coinbase_freeze_active GUARDED_BY(cs_wallet){false};
+
     /** The next scheduled rebroadcast of wallet transactions. */
     NodeClock::time_point m_next_resend{GetDefaultNextResend()};
     /** Whether this wallet will submit newly created transactions to the node's mempool and
@@ -550,6 +556,10 @@ public:
      */
     int GetTxBlocksToMaturity(const CWalletTx& wtx) const EXCLUSIVE_LOCKS_REQUIRED(cs_wallet);
     bool IsTxImmatureCoinBase(const CWalletTx& wtx) const EXCLUSIVE_LOCKS_REQUIRED(cs_wallet);
+    //! Whether the temporary coinbase spend freeze covers the next block.
+    //! Cached against the wallet's tip: the balance and coin selection paths
+    //! ask this once per transaction.
+    bool IsCoinbaseSpendFrozen() const EXCLUSIVE_LOCKS_REQUIRED(cs_wallet);
 
     //! check whether we support the named feature
     bool CanSupportFeature(enum WalletFeature wf) const override EXCLUSIVE_LOCKS_REQUIRED(cs_wallet) { AssertLockHeld(cs_wallet); return IsFeatureSupported(nWalletVersion, wf); }

@@ -19,6 +19,7 @@
 #include <common/system.h>
 #include <consensus/amount.h>
 #include <consensus/consensus.h>
+#include <consensus/params.h>
 #include <consensus/validation.h>
 #include <external_signer.h>
 #include <interfaces/chain.h>
@@ -76,6 +77,7 @@
 #include <cassert>
 #include <condition_variable>
 #include <exception>
+#include <limits>
 #include <optional>
 #include <stdexcept>
 #include <thread>
@@ -3649,10 +3651,36 @@ int CWallet::GetTxBlocksToMaturity(const CWalletTx& wtx) const
     return std::max(0, (COINBASE_MATURITY+1) - chain_depth);
 }
 
+bool CWallet::IsCoinbaseSpendFrozen() const
+{
+    AssertLockHeld(cs_wallet);
+
+    const Consensus::Params& consensus{Params().GetConsensus()};
+    // Nothing to look up on a chain that has not scheduled the freeze, which
+    // keeps this off the balance and coin selection paths entirely.
+    if (!consensus.IsCoinbaseFreezeScheduled()) return false;
+    // No chain context yet, so nothing is spendable to get wrong either.
+    if (m_last_block_processed.IsNull()) return false;
+
+    if (m_coinbase_freeze_tip != m_last_block_processed) {
+        int64_t mtp{0};
+        // The wallet's own last processed block must be findable; guessing
+        // here would silently offer frozen outputs for spending.
+        CHECK_NONFATAL(chain().findBlock(m_last_block_processed, FoundBlock().mtpTime(mtp)));
+        m_coinbase_freeze_active = consensus.CoinbaseFreezeActiveAt(mtp);
+        m_coinbase_freeze_tip = m_last_block_processed;
+    }
+    return m_coinbase_freeze_active;
+}
+
 bool CWallet::IsTxImmatureCoinBase(const CWalletTx& wtx) const
 {
     AssertLockHeld(cs_wallet);
 
+    if (!wtx.IsCoinBase()) return false;
+    // Frozen coinbase outputs are unspendable at any depth, so report them the
+    // same way an immature one is rather than offering them for selection.
+    if (IsCoinbaseSpendFrozen()) return true;
     // note GetBlocksToMaturity is 0 for non-coinbase tx
     return GetTxBlocksToMaturity(wtx) > 0;
 }
