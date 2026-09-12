@@ -123,6 +123,24 @@ struct Params {
      * behaviour is unchanged on chains that do not set it.
      */
     int64_t RdtsExpiryTime{std::numeric_limits<int64_t>::min()};
+    /**
+     * Rolling generation maturity: a coinbase output may only be spent once
+     * CoinbaseMaturitySeconds have passed since the block that created it, so
+     * each output matures on its own schedule rather than in a batch.
+     *
+     * Both instants are median-time-past values, which are non-decreasing
+     * along a chain, so an output's maturity instant is fixed and the rule for
+     * the next block is knowable in advance. The anchor is taken from the
+     * block before the one that created the output, as BIP68 does for relative
+     * time locks, so the miner being locked contributes no timestamp of its
+     * own to it.
+     *
+     * Only outputs created at or after CoinbaseMaturityRollingHeight are
+     * covered, so the flag day immobilizes nothing that was already spendable.
+     * Expires with RDTS. Unscheduled by default.
+     */
+    int CoinbaseMaturityRollingHeight{std::numeric_limits<int>::max()};
+    int64_t CoinbaseMaturitySeconds{45 * 24 * 60 * 60};
     /** Don't warn about unknown BIP 9 activations below this height.
      * This prevents us from warning about the CSV and segwit activations. */
     int MinBIP9WarningHeight;
@@ -179,6 +197,20 @@ struct Params {
             return Blake2bHeight;
         } // no default case, so the compiler can warn about missing cases
         return std::numeric_limits<int>::max();
+    }
+
+    /** Whether the rolling generation maturity is scheduled on this chain. */
+    bool IsRollingCoinbaseMaturityScheduled() const
+    {
+        return CoinbaseMaturityRollingHeight != std::numeric_limits<int>::max();
+    }
+
+    /** Whether consensus enforces the rolling maturity for a block at this
+     *  height whose parent has the given median-time-past. */
+    bool RollingCoinbaseMaturityActiveAt(int height, int64_t mtp_prev) const
+    {
+        return IsRollingCoinbaseMaturityScheduled() && height >= CoinbaseMaturityRollingHeight &&
+               mtp_prev < RdtsExpiryTime;
     }
 
     bool IsBlake2bHeight(int height) const
