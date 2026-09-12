@@ -357,6 +357,34 @@ static bool IsCurrentForFeeEstimation(Chainstate& active_chainstate) EXCLUSIVE_L
     return true;
 }
 
+bool CheckRollingCoinbaseMaturity(const CTransaction& tx, TxValidationState& state,
+                                  const CCoinsViewCache& inputs, const CBlockIndex& spend_prev,
+                                  const Consensus::Params& params)
+{
+    const int64_t spend_time{spend_prev.GetMedianTimePast()};
+    for (const CTxIn& txin : tx.vin) {
+        const Coin& coin{inputs.AccessCoin(txin.prevout)};
+        if (!coin.IsCoinBase()) continue;
+        // Outputs mined before the flag day keep the ordinary depth rule, so
+        // the deployment never immobilizes coins that were already spendable.
+        if (coin.nHeight < params.CoinbaseMaturityRollingHeight) continue;
+        const CBlockIndex* creator{spend_prev.GetAncestor(std::max(coin.nHeight - 1, 0))};
+        if (!creator) {
+            // Every coin reachable here was created in an ancestor of
+            // spend_prev, so this is unreachable. Refuse rather than guess.
+            return state.Invalid(TxValidationResult::TX_PREMATURE_SPEND, "bad-txns-coinbase-origin-unknown",
+                strprintf("no ancestor at height %d for the coinbase being spent", coin.nHeight));
+        }
+        const int64_t mature_at{creator->GetMedianTimePast() + params.CoinbaseMaturitySeconds};
+        if (spend_time < mature_at) {
+            return state.Invalid(TxValidationResult::TX_PREMATURE_SPEND, "bad-txns-coinbase-immature-time",
+                strprintf("coinbase from height %d matures at %d, spending block's parent median-time-past is %d",
+                          coin.nHeight, mature_at, spend_time));
+        }
+    }
+    return true;
+}
+
 void Chainstate::MaybeUpdateMempoolForReorg(
     DisconnectedBlockTransactions& disconnectpool,
     bool fAddToMempool)
@@ -431,8 +459,15 @@ void Chainstate::MaybeUpdateMempoolForReorg(
             }
         }
 
-        // If the transaction spends any coinbase outputs, it must be mature.
+        // If the transaction spends any coinbase outputs, it must be mature,
+        // by depth and, where it applies, by the rolling maturity.
         if (it->GetSpendsCoinbase()) {
+            const CBlockIndex& tip{*Assert(m_chain.Tip())};
+            const Consensus::Params& consensus{m_chainman.GetConsensus()};
+            if (consensus.RollingCoinbaseMaturityActiveAt(tip.nHeight + 1, tip.GetMedianTimePast())) {
+                TxValidationState dummy;
+                if (!CheckRollingCoinbaseMaturity(tx, dummy, CoinsTip(), tip, consensus)) return true;
+            }
             for (const CTxIn& txin : tx.vin) {
                 if (m_mempool->exists(GenTxid::Txid(txin.prevout.hash))) continue;
                 const Coin& coin{CoinsTip().AccessCoin(txin.prevout)};
@@ -1017,6 +1052,15 @@ bool MemPoolAccept::PreChecks(ATMPArgs& args, Workspace& ws)
     const auto block_height_next = block_height_current + 1;
     if (!Consensus::CheckTxInputs(tx, state, m_view, block_height_next, ws.m_base_fees, CheckTxInputsRules::OutputSizeLimit)) {
         return false; // state filled in by CheckTxInputs
+    }
+
+    // The next block's parent is the tip, so this evaluates exactly what
+    // ConnectBlock will evaluate for that block.
+    const CBlockIndex& tip{*Assert(m_active_chainstate.m_chain.Tip())};
+    const Consensus::Params& consensus{m_active_chainstate.m_chainman.GetConsensus()};
+    if (consensus.RollingCoinbaseMaturityActiveAt(block_height_next, tip.GetMedianTimePast()) &&
+        !CheckRollingCoinbaseMaturity(tx, state, m_view, tip, consensus)) {
+        return false; // state filled in by CheckRollingCoinbaseMaturity
     }
 
     if (m_pool.m_opts.minrelaymaturity) {
@@ -2976,7 +3020,10 @@ bool Chainstate::ConnectBlock(const CBlock& block, BlockValidationState& state, 
     // Grandfathering below compares each input's creating height against the
     // fork height: activation and the exemption boundary are the same instant
     // by construction.
-    const bool reduced_data_active{params.GetConsensus().RdtsActiveAt(pindex->nHeight, Assert(pindex->pprev)->GetMedianTimePast())};
+    const CBlockIndex& parent{*Assert(pindex->pprev)};
+    const int64_t mtp_prev{parent.GetMedianTimePast()};
+    const bool reduced_data_active{params.GetConsensus().RdtsActiveAt(pindex->nHeight, mtp_prev)};
+    const bool rolling_maturity_active{params.GetConsensus().RollingCoinbaseMaturityActiveAt(pindex->nHeight, mtp_prev)};
     const auto reduced_data_start_height = reduced_data_active
         ? params.GetConsensus().RdtsActivationHeight()
         : 0;
@@ -3020,7 +3067,8 @@ bool Chainstate::ConnectBlock(const CBlock& block, BlockValidationState& state, 
         {
             CAmount txfee = 0;
             TxValidationState tx_state;
-            if (!Consensus::CheckTxInputs(tx, tx_state, view, pindex->nHeight, txfee, chk_input_rules)) {
+            if (!Consensus::CheckTxInputs(tx, tx_state, view, pindex->nHeight, txfee, chk_input_rules) ||
+                (rolling_maturity_active && !CheckRollingCoinbaseMaturity(tx, tx_state, view, parent, params.GetConsensus()))) {
                 // Any transaction validation failure in ConnectBlock is a block consensus failure
                 state.Invalid(BlockValidationResult::BLOCK_CONSENSUS,
                               tx_state.GetRejectReason(),
