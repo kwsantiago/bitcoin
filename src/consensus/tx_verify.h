@@ -6,7 +6,9 @@
 #define BITCOIN_CONSENSUS_TX_VERIFY_H
 
 #include <consensus/amount.h>
+#include <consensus/consensus.h>
 
+#include <algorithm>
 #include <stdint.h>
 #include <vector>
 
@@ -41,6 +43,14 @@ public:
     }
 };
 
+/** Depth a generation output created at `coin_height` must reach before it can
+ *  be spent, given the maturity in force. Never below COINBASE_MATURITY. */
+inline int RequiredCoinbaseMaturity(int coin_height, int coinbase_maturity, int coinbase_maturity_from_height)
+{
+    return coin_height >= coinbase_maturity_from_height ? std::max(coinbase_maturity, COINBASE_MATURITY)
+                                                        : COINBASE_MATURITY;
+}
+
 namespace Consensus {
 /**
  * Check whether all outputs of this transaction satisfy size limits.
@@ -55,7 +65,7 @@ bool CheckOutputSizes(const CTransaction& tx, TxValidationState& state);
  * @param[out] txfee Set to the transaction fee if successful.
  * Preconditions: tx.IsCoinBase() is false.
  */
-[[nodiscard]] bool CheckTxInputs(const CTransaction& tx, TxValidationState& state, const CCoinsViewCache& inputs, int nSpendHeight, CAmount& txfee, CheckTxInputsRules rules);
+[[nodiscard]] bool CheckTxInputs(const CTransaction& tx, TxValidationState& state, const CCoinsViewCache& inputs, int nSpendHeight, CAmount& txfee, CheckTxInputsRules rules, int coinbase_maturity, int coinbase_maturity_from_height);
 } // namespace Consensus
 
 /** Auxiliary functions for transaction validation (ideally should not be exposed) */
