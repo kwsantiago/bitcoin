@@ -6,6 +6,7 @@
 #ifndef BITCOIN_CONSENSUS_PARAMS_H
 #define BITCOIN_CONSENSUS_PARAMS_H
 
+#include <consensus/consensus.h>
 #include <uint256.h>
 
 #include <chrono>
@@ -123,6 +124,21 @@ struct Params {
      * behaviour is unchanged on chains that do not set it.
      */
     int64_t RdtsExpiryTime{std::numeric_limits<int64_t>::min()};
+    /**
+     * Temporary extended generation maturity: until RDTS expires, a coinbase
+     * output created at or after CoinbaseMaturityLongStartHeight must be
+     * CoinbaseMaturityLong blocks deep rather than COINBASE_MATURITY. Outputs
+     * mined before that height keep the ordinary rule, so the deployment only
+     * applies going forward.
+     *
+     * The end shares RdtsExpiryTime, so there is no second date to drift, and
+     * uses the parent block's median-time-past like the other RDTS boundaries.
+     * At the expiry the requirement drops to COINBASE_MATURITY for every
+     * covered output at once, so those already that deep become spendable
+     * together. Unscheduled by default.
+     */
+    int CoinbaseMaturityLongStartHeight{std::numeric_limits<int>::max()};
+    int CoinbaseMaturityLong{COINBASE_MATURITY_LONG};
     /** Don't warn about unknown BIP 9 activations below this height.
      * This prevents us from warning about the CSV and segwit activations. */
     int MinBIP9WarningHeight;
@@ -179,6 +195,15 @@ struct Params {
             return Blake2bHeight;
         } // no default case, so the compiler can warn about missing cases
         return std::numeric_limits<int>::max();
+    }
+
+    /** Height from which the extended maturity applies to a block whose parent
+     *  has the given median-time-past, or unreachable once RDTS has expired.
+     *  Outputs mined below it keep COINBASE_MATURITY. */
+    int CoinbaseMaturityLongFrom(int64_t mtp_prev) const
+    {
+        return mtp_prev < RdtsExpiryTime ? CoinbaseMaturityLongStartHeight
+                                         : std::numeric_limits<int>::max();
     }
 
     bool IsBlake2bHeight(int height) const

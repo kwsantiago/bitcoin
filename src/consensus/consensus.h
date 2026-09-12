@@ -19,6 +19,9 @@ static const unsigned int REDUCED_DATA_MAX_BLOCK_WEIGHT = 800000;
 static const int64_t MAX_BLOCK_SIGOPS_COST = 80000;
 /** Coinbase transaction outputs can only be spent after this number of new blocks (network rule) */
 static const int COINBASE_MATURITY = 100;
+/** Coinbase maturity while the temporary extended maturity is in force: 45 days
+ *  at the target block spacing (network rule) */
+static const int COINBASE_MATURITY_LONG = 6480;
 
 static const int WITNESS_SCALE_FACTOR = 4;
 
