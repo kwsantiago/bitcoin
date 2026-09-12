@@ -148,6 +148,9 @@ bool BlockAssembler::isStillDependent(const CTxMemPool& mempool, CTxMemPool::txi
 
 bool BlockAssembler::TestForBlock(CTxMemPool::txiter iter)
 {
+    if (m_coinbase_freeze_active && iter->GetSpendsCoinbase()) {
+        return false;
+    }
     uint64_t packageSize = iter->GetSizeWithAncestors();
     int64_t packageSigOps = iter->GetSigOpCostWithAncestors();
     if (!TestPackage(packageSize, packageSigOps)) {

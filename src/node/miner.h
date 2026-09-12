@@ -164,6 +164,7 @@ private:
     // Chain context for the block
     int nHeight;
     int64_t m_lock_time_cutoff;
+    bool m_coinbase_freeze_active{false};
 
     const CChainParams& chainparams;
     const CTxMemPool* const m_mempool;

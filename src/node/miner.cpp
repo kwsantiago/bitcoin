@@ -184,6 +184,8 @@ std::shared_ptr<CBlockTemplate> BlockAssembler::CreateNewBlock()
 
     pblock->nTime = TicksSinceEpoch<std::chrono::seconds>(NodeClock::now());
     m_lock_time_cutoff = pindexPrev->GetMedianTimePast();
+    m_coinbase_freeze_active = chainparams.GetConsensus().IsCoinbaseFreezeScheduled() &&
+                               chainparams.GetConsensus().CoinbaseFreezeActiveAt(pindexPrev->GetMedianTimePast());
 
     int nPackagesSelected = 0;
     int nDescendantsUpdated = 0;
@@ -279,6 +281,9 @@ bool BlockAssembler::TestPackageTransactions(const CTxMemPool::setEntries& packa
     uint64_t nPotentialBlockSize = nBlockSize; // only used with fNeedSizeAccounting
     for (CTxMemPool::txiter it : package) {
         if (!IsFinalTx(it->GetTx(), nHeight, m_lock_time_cutoff)) {
+            return false;
+        }
+        if (m_coinbase_freeze_active && it->GetSpendsCoinbase()) {
             return false;
         }
         if (fNeedSizeAccounting) {
