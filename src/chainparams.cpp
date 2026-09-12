@@ -93,6 +93,26 @@ void ReadRegTestArgs(const ArgsManager& args, CChainParams::RegTestOptions& opti
         options.rdts_expiry_time = expiry;
     }
 
+    if (const auto arg{args.GetArg("-coinbasematurityrolling", "")}; !arg.empty()) {
+        // The deployment expires with RDTS, so it cannot be scheduled without one.
+        if (!options.rdts_expiry_time) {
+            throw std::runtime_error("-coinbasematurityrolling requires -rdtsexpiry=<time> (the rolling maturity expires with RDTS).");
+        }
+        std::vector<std::string> fields{SplitString(arg, ':')};
+        int height;
+        int64_t seconds;
+        if (fields.size() != 2 || !ParseInt32(fields[0], &height) || !ParseInt64(fields[1], &seconds)) {
+            throw std::runtime_error(strprintf("Invalid format (%s) for -coinbasematurityrolling=<height>:<seconds>.", arg));
+        }
+        // INT_MAX is the unscheduled sentinel, and the period is bounded so
+        // that adding it to a median-time-past cannot overflow.
+        constexpr int64_t MAX_MATURITY_SECONDS{100LL * 365 * 24 * 60 * 60};
+        if (height < 0 || height == std::numeric_limits<int>::max() || seconds <= 0 || seconds > MAX_MATURITY_SECONDS) {
+            throw std::runtime_error(strprintf("Invalid values (%s) for -coinbasematurityrolling=<height>:<seconds>: need 0 <= height < %d and 0 < seconds <= %d.", arg, std::numeric_limits<int>::max(), MAX_MATURITY_SECONDS));
+        }
+        options.coinbase_maturity_rolling.emplace(height, seconds);
+    }
+
     if (const auto arg{args.GetArg("-blake2b_headline")}; arg) {
         if (!options.activation_heights.contains(Consensus::BuriedDeployment::DEPLOYMENT_BLAKE2B)) {
             throw std::runtime_error("-blake2b_headline requires -testactivationheight=blake2b@<height>");

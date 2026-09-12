@@ -170,6 +170,10 @@ public:
         //! height until the parent block's median-time-past reaches this
         //! value (see -rdtsexpiry). Requires a blake2b activation height.
         std::optional<int64_t> rdts_expiry_time{};
+        //! If set, {activation height, maturity seconds} for the rolling
+        //! generation maturity (see -coinbasematurityrolling). Requires an
+        //! RDTS expiry, which is also its expiry.
+        std::optional<std::pair<int, int64_t>> coinbase_maturity_rolling{};
         std::optional<std::vector<unsigned char>> blake2b_headline{};
     };
 

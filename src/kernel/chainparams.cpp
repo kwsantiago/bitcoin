@@ -653,6 +653,12 @@ public:
             }
         }
 
+        if (opts.coinbase_maturity_rolling) {
+            const auto& [height, seconds] = *opts.coinbase_maturity_rolling;
+            consensus.CoinbaseMaturityRollingHeight = height;
+            consensus.CoinbaseMaturitySeconds = seconds;
+        }
+
         if (opts.blake2b_headline) {
             consensus.Blake2bHeadline = *opts.blake2b_headline;
         }
