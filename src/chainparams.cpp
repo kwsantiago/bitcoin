@@ -93,6 +93,22 @@ void ReadRegTestArgs(const ArgsManager& args, CChainParams::RegTestOptions& opti
         options.rdts_expiry_time = expiry;
     }
 
+    if (const auto arg{args.GetArg("-coinbasematuritylong", "")}; !arg.empty()) {
+        // The deployment ends with RDTS, so it cannot be scheduled without one.
+        if (!options.rdts_expiry_time) {
+            throw std::runtime_error("-coinbasematuritylong requires -rdtsexpiry=<time> (the extended maturity ends with RDTS).");
+        }
+        std::vector<std::string> fields{SplitString(arg, ':')};
+        int start, depth;
+        if (fields.size() != 2 || !ParseInt32(fields[0], &start) || !ParseInt32(fields[1], &depth)) {
+            throw std::runtime_error(strprintf("Invalid format (%s) for -coinbasematuritylong=<start>:<depth>.", arg));
+        }
+        if (start < 0 || start == std::numeric_limits<int>::max() || depth < COINBASE_MATURITY) {
+            throw std::runtime_error(strprintf("Invalid values (%s) for -coinbasematuritylong=<start>:<depth>: need 0 <= start < %d and a depth of at least %d.", arg, std::numeric_limits<int>::max(), COINBASE_MATURITY));
+        }
+        options.coinbase_maturity_long.emplace(start, depth);
+    }
+
     if (const auto arg{args.GetArg("-blake2b_headline")}; arg) {
         if (!options.activation_heights.contains(Consensus::BuriedDeployment::DEPLOYMENT_BLAKE2B)) {
             throw std::runtime_error("-blake2b_headline requires -testactivationheight=blake2b@<height>");
