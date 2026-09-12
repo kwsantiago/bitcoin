@@ -397,6 +397,10 @@ void Chainstate::MaybeUpdateMempoolForReorg(
     // the disconnectpool that were added back and cleans up the mempool state.
     m_mempool->UpdateTransactionsFromBlock(vHashUpdate);
 
+    const Consensus::Params& consensus{m_chainman.GetConsensus()};
+    const bool freeze_active{consensus.IsCoinbaseFreezeScheduled() &&
+                             consensus.CoinbaseFreezeActiveAt(Assert(m_chain.Tip())->GetMedianTimePast())};
+
     // Predicate to use for filtering transactions in removeForReorg.
     // Checks whether the transaction is still final and, if it spends a coinbase output, mature.
     // Also updates valid entries' cached LockPoints if needed.
@@ -431,14 +435,14 @@ void Chainstate::MaybeUpdateMempoolForReorg(
             }
         }
 
-        // If the transaction spends any coinbase outputs, it must be mature.
+        // If the transaction spends any coinbase outputs, it must be mature and unfrozen.
         if (it->GetSpendsCoinbase()) {
             for (const CTxIn& txin : tx.vin) {
                 if (m_mempool->exists(GenTxid::Txid(txin.prevout.hash))) continue;
                 const Coin& coin{CoinsTip().AccessCoin(txin.prevout)};
                 assert(!coin.IsSpent());
                 const auto mempool_spend_height{m_chain.Tip()->nHeight + 1};
-                if (coin.IsCoinBase() && mempool_spend_height - coin.nHeight < COINBASE_MATURITY) {
+                if (coin.IsCoinBase() && (freeze_active || mempool_spend_height - coin.nHeight < COINBASE_MATURITY)) {
                     return true;
                 }
             }
@@ -1015,7 +1019,15 @@ bool MemPoolAccept::PreChecks(ATMPArgs& args, Workspace& ws)
     // The mempool holds txs for the next block, so pass height+1 to CheckTxInputs
     const auto block_height_current = m_active_chainstate.m_chain.Height();
     const auto block_height_next = block_height_current + 1;
-    if (!Consensus::CheckTxInputs(tx, state, m_view, block_height_next, ws.m_base_fees, CheckTxInputsRules::OutputSizeLimit)) {
+    // The next block's parent is the tip, so the tip's median-time-past is the
+    // parent median-time-past CoinbaseFreezeActiveAt expects. Unlike the output
+    // size limit this cannot be applied unconditionally.
+    const Consensus::Params& consensus{m_active_chainstate.m_chainman.GetConsensus()};
+    const bool freeze_active{consensus.IsCoinbaseFreezeScheduled() &&
+                             consensus.CoinbaseFreezeActiveAt(Assert(m_active_chainstate.m_chain.Tip())->GetMedianTimePast())};
+    const CheckTxInputsRules input_rules{CheckTxInputsRules{CheckTxInputsRules::OutputSizeLimit} |
+        (freeze_active ? CheckTxInputsRules::NoCoinbaseSpend : CheckTxInputsRules::None)};
+    if (!Consensus::CheckTxInputs(tx, state, m_view, block_height_next, ws.m_base_fees, input_rules)) {
         return false; // state filled in by CheckTxInputs
     }
 
@@ -2976,7 +2988,8 @@ bool Chainstate::ConnectBlock(const CBlock& block, BlockValidationState& state, 
     // Grandfathering below compares each input's creating height against the
     // fork height: activation and the exemption boundary are the same instant
     // by construction.
-    const bool reduced_data_active{params.GetConsensus().RdtsActiveAt(pindex->nHeight, Assert(pindex->pprev)->GetMedianTimePast())};
+    const int64_t mtp_prev{Assert(pindex->pprev)->GetMedianTimePast()};
+    const bool reduced_data_active{params.GetConsensus().RdtsActiveAt(pindex->nHeight, mtp_prev)};
     const auto reduced_data_start_height = reduced_data_active
         ? params.GetConsensus().RdtsActivationHeight()
         : 0;
@@ -2991,7 +3004,9 @@ bool Chainstate::ConnectBlock(const CBlock& block, BlockValidationState& state, 
         return state.Invalid(BlockValidationResult::BLOCK_CONSENSUS, "bad-blk-weight-reduced_data", strprintf("%s : RDTS weight limit failed", __func__));
     }
 
-    const CheckTxInputsRules chk_input_rules{reduced_data_active ? CheckTxInputsRules::OutputSizeLimit : CheckTxInputsRules::None};
+    const CheckTxInputsRules chk_input_rules{
+        CheckTxInputsRules{reduced_data_active ? CheckTxInputsRules::OutputSizeLimit : CheckTxInputsRules::None} |
+        (params.GetConsensus().CoinbaseFreezeActiveAt(mtp_prev) ? CheckTxInputsRules::NoCoinbaseSpend : CheckTxInputsRules::None)};
 
     // Check generation tx output sizes if REDUCED_DATA is active
     if (chk_input_rules.test(CheckTxInputsRules::OutputSizeLimit)) {
@@ -3872,6 +3887,27 @@ bool Chainstate::ActivateBestChainStep(BlockValidationState& state, CBlockIndex*
         // If any blocks were disconnected, disconnectpool may be non empty.  Add
         // any disconnected transactions back to the mempool.
         MaybeUpdateMempoolForReorg(disconnectpool, true);
+    }
+
+    // The coinbase spend freeze is the only rule here that tightens partway
+    // along a chain, so transactions accepted before it took effect can still
+    // be in the mempool once it has, and the next block template would be
+    // invalid. Only the plain-extension case needs this: when blocks were
+    // disconnected, MaybeUpdateMempoolForReorg above has already evicted them
+    // through filter_final_and_mature. Restricting it that way also keeps
+    // removeForReorg's assertion that every surviving entry's lock points are
+    // still valid locally true, since extending a chain cannot invalidate one.
+    if (m_mempool && !fBlocksDisconnected && pindexOldTip && m_chain.Tip() != pindexOldTip &&
+        m_chainman.GetConsensus().IsCoinbaseFreezeScheduled()) {
+        const Consensus::Params& consensus{m_chainman.GetConsensus()};
+        const int64_t mtp_new{Assert(m_chain.Tip())->GetMedianTimePast()};
+        if (consensus.CoinbaseFreezeActiveAt(mtp_new) &&
+            !consensus.CoinbaseFreezeActiveAt(pindexOldTip->GetMedianTimePast())) {
+            // Reported as REORG for want of a better existing reason; these
+            // transactions do not become valid again until the window closes.
+            LogPrintf("Coinbase spend freeze took effect at height %d; removing mempool transactions that spend coinbase outputs\n", m_chain.Height());
+            m_mempool->removeForReorg(m_chain, [](CTxMemPool::txiter it) EXCLUSIVE_LOCKS_REQUIRED(m_mempool->cs, ::cs_main) { return it->GetSpendsCoinbase(); });
+        }
     }
     if (m_mempool) m_mempool->check(this->CoinsTip(), this->m_chain.Height() + 1);
 
