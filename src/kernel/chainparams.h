@@ -170,6 +170,10 @@ public:
         //! height until the parent block's median-time-past reaches this
         //! value (see -rdtsexpiry). Requires a blake2b activation height.
         std::optional<int64_t> rdts_expiry_time{};
+        //! If set, coinbase outputs are unspendable from the block whose
+        //! parent median-time-past reaches this value until the RDTS expiry
+        //! (see -coinbasefreezestart). Requires an RDTS expiry.
+        std::optional<int64_t> coinbase_freeze_start_time{};
         std::optional<std::vector<unsigned char>> blake2b_headline{};
     };
 

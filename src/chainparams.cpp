@@ -93,6 +93,21 @@ void ReadRegTestArgs(const ArgsManager& args, CChainParams::RegTestOptions& opti
         options.rdts_expiry_time = expiry;
     }
 
+    if (const auto arg{args.GetArg("-coinbasefreezestart", "")}; !arg.empty()) {
+        // The freeze ends with RDTS, so it cannot be scheduled without one.
+        if (!options.rdts_expiry_time) {
+            throw std::runtime_error("-coinbasefreezestart requires -rdtsexpiry=<time> (the freeze expires with RDTS).");
+        }
+        int64_t start;
+        if (!ParseInt64(arg, &start) || start <= 1296688602) {
+            throw std::runtime_error(strprintf("Invalid start (%s) for -coinbasefreezestart=<time>: must exceed the regtest genesis timestamp (1296688602).", arg));
+        }
+        if (start >= *options.rdts_expiry_time) {
+            throw std::runtime_error(strprintf("Invalid start (%s) for -coinbasefreezestart=<time>: must precede -rdtsexpiry (%d).", arg, *options.rdts_expiry_time));
+        }
+        options.coinbase_freeze_start_time = start;
+    }
+
     if (const auto arg{args.GetArg("-blake2b_headline")}; arg) {
         if (!options.activation_heights.contains(Consensus::BuriedDeployment::DEPLOYMENT_BLAKE2B)) {
             throw std::runtime_error("-blake2b_headline requires -testactivationheight=blake2b@<height>");
@@ -160,24 +175,34 @@ const CChainParams &Params() {
     return *globalChainParams;
 }
 
+// A scheduled freeze that does not start before the RDTS expiry is an empty
+// window, which would make the rule silently inert. Checked for every chain
+// here rather than per-network, so it cannot be forgotten.
+static std::unique_ptr<const CChainParams> CheckedParams(std::unique_ptr<const CChainParams> params)
+{
+    const Consensus::Params& consensus{params->GetConsensus()};
+    assert(!consensus.IsCoinbaseFreezeScheduled() || consensus.CoinbaseFreezeStartTime < consensus.RdtsExpiryTime);
+    return params;
+}
+
 std::unique_ptr<const CChainParams> CreateChainParams(const ArgsManager& args, const ChainType chain)
 {
     switch (chain) {
     case ChainType::MAIN:
-        return CChainParams::Main();
+        return CheckedParams(CChainParams::Main());
     case ChainType::TESTNET:
-        return CChainParams::TestNet();
+        return CheckedParams(CChainParams::TestNet());
     case ChainType::TESTNET4:
-        return CChainParams::TestNet4();
+        return CheckedParams(CChainParams::TestNet4());
     case ChainType::SIGNET: {
         auto opts = CChainParams::SigNetOptions{};
         ReadSigNetArgs(args, opts);
-        return CChainParams::SigNet(opts);
+        return CheckedParams(CChainParams::SigNet(opts));
     }
     case ChainType::REGTEST: {
         auto opts = CChainParams::RegTestOptions{};
         ReadRegTestArgs(args, opts);
-        return CChainParams::RegTest(opts);
+        return CheckedParams(CChainParams::RegTest(opts));
     }
     }
     assert(false);

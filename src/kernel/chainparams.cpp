@@ -665,6 +665,10 @@ public:
             consensus.RdtsExpiryTime = *opts.rdts_expiry_time;
         }
 
+        if (opts.coinbase_freeze_start_time) {
+            consensus.CoinbaseFreezeStartTime = *opts.coinbase_freeze_start_time;
+        }
+
         for (const auto& [deployment_pos, version_bits_params] : opts.version_bits_parameters) {
             consensus.vDeployments[deployment_pos].nStartTime = version_bits_params.start_time;
             consensus.vDeployments[deployment_pos].nTimeout = version_bits_params.timeout;
