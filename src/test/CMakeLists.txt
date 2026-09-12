@@ -31,6 +31,7 @@ add_executable(test_bitcoin
   checkqueue_tests.cpp
   cluster_linearize_tests.cpp
   codex32_tests.cpp
+  coinbase_freeze_params_tests.cpp
   coins_tests.cpp
   coinscachepair_tests.cpp
   coinstatsindex_tests.cpp
