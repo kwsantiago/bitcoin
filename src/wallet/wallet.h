@@ -321,6 +321,12 @@ private:
     //! the current wallet version: clients below this version are not able to load the wallet
     int nWalletVersion GUARDED_BY(cs_wallet){FEATURE_BASE};
 
+    /** Cached RollingMaturityCutoffHeight, keyed on the wallet's tip. Median
+     *  time past never changes for a given block, so this holds until the tip
+     *  moves. */
+    mutable uint256 m_rolling_cutoff_tip GUARDED_BY(cs_wallet);
+    mutable int m_rolling_cutoff GUARDED_BY(cs_wallet){std::numeric_limits<int>::max()};
+
     /** The next scheduled rebroadcast of wallet transactions. */
     NodeClock::time_point m_next_resend{GetDefaultNextResend()};
     /** Whether this wallet will submit newly created transactions to the node's mempool and
@@ -550,6 +556,11 @@ public:
      */
     int GetTxBlocksToMaturity(const CWalletTx& wtx) const EXCLUSIVE_LOCKS_REQUIRED(cs_wallet);
     bool IsTxImmatureCoinBase(const CWalletTx& wtx) const EXCLUSIVE_LOCKS_REQUIRED(cs_wallet);
+    //! Highest block height whose generation output can now be spent. Never
+    //! below CoinbaseMaturityRollingHeight - 1, since outputs under the flag
+    //! day are exempt, and std::numeric_limits<int>::max() when the rule is
+    //! not scheduled at all.
+    int RollingMaturityCutoffHeight() const EXCLUSIVE_LOCKS_REQUIRED(cs_wallet);
 
     //! check whether we support the named feature
     bool CanSupportFeature(enum WalletFeature wf) const override EXCLUSIVE_LOCKS_REQUIRED(cs_wallet) { AssertLockHeld(cs_wallet); return IsFeatureSupported(nWalletVersion, wf); }

@@ -19,6 +19,7 @@
 #include <common/system.h>
 #include <consensus/amount.h>
 #include <consensus/consensus.h>
+#include <consensus/params.h>
 #include <consensus/validation.h>
 #include <external_signer.h>
 #include <interfaces/chain.h>
@@ -76,6 +77,7 @@
 #include <cassert>
 #include <condition_variable>
 #include <exception>
+#include <limits>
 #include <optional>
 #include <stdexcept>
 #include <thread>
@@ -3649,12 +3651,58 @@ int CWallet::GetTxBlocksToMaturity(const CWalletTx& wtx) const
     return std::max(0, (COINBASE_MATURITY+1) - chain_depth);
 }
 
+int CWallet::RollingMaturityCutoffHeight() const
+{
+    AssertLockHeld(cs_wallet);
+
+    const Consensus::Params& consensus{Params().GetConsensus()};
+    if (!consensus.IsRollingCoinbaseMaturityScheduled()) return std::numeric_limits<int>::max();
+    // Outputs below the flag day are exempt whatever else we can determine, so
+    // this is the floor on every answer, including the failure paths.
+    const int grandfathered{consensus.CoinbaseMaturityRollingHeight - 1};
+    if (m_last_block_processed.IsNull()) return grandfathered;
+    if (m_rolling_cutoff_tip == m_last_block_processed) return m_rolling_cutoff;
+
+    int64_t tip_mtp{0};
+    if (!chain().findBlock(m_last_block_processed, FoundBlock().mtpTime(tip_mtp))) return grandfathered;
+    if (!consensus.RollingCoinbaseMaturityActiveAt(GetLastBlockHeight() + 1, tip_mtp)) {
+        m_rolling_cutoff = std::numeric_limits<int>::max();
+    } else {
+        // Anchored one block below the output, exactly as
+        // CheckRollingCoinbaseMaturity does. Median time past is
+        // non-decreasing with height, so the matured heights are a prefix and
+        // one search settles every coinbase.
+        const int64_t deadline{tip_mtp - consensus.CoinbaseMaturitySeconds};
+        int lo{0}, hi{GetLastBlockHeight()}, cutoff{-1};
+        while (lo <= hi) {
+            const int mid{lo + (hi - lo) / 2};
+            int64_t mtp{0};
+            if (!chain().findAncestorByHeight(m_last_block_processed, std::max(mid - 1, 0), FoundBlock().mtpTime(mtp))) return grandfathered;
+            if (mtp <= deadline) {
+                cutoff = mid;
+                lo = mid + 1;
+            } else {
+                hi = mid - 1;
+            }
+        }
+        m_rolling_cutoff = std::max(cutoff, grandfathered);
+    }
+    m_rolling_cutoff_tip = m_last_block_processed;
+    return m_rolling_cutoff;
+}
+
 bool CWallet::IsTxImmatureCoinBase(const CWalletTx& wtx) const
 {
     AssertLockHeld(cs_wallet);
 
-    // note GetBlocksToMaturity is 0 for non-coinbase tx
-    return GetTxBlocksToMaturity(wtx) > 0;
+    if (!wtx.IsCoinBase()) return false;
+    if (GetTxBlocksToMaturity(wtx) > 0) return true;
+    // A coinbase still inside its rolling period cannot be spent either, so
+    // report it the same way rather than offering it for selection.
+    if (const auto* conf{wtx.state<TxStateConfirmed>()}) {
+        return conf->confirmed_block_height > RollingMaturityCutoffHeight();
+    }
+    return false;
 }
 
 bool CWallet::IsTxAssumed(const CWalletTx& wtx) const EXCLUSIVE_LOCKS_REQUIRED(cs_wallet)

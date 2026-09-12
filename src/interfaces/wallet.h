@@ -435,6 +435,9 @@ struct WalletTxStatus
     bool is_trusted;
     bool is_abandoned;
     bool is_coinbase;
+    //! Generation output that cannot be spent yet, by depth or by the rolling
+    //! maturity period. blocks_to_maturity only covers the former.
+    bool is_immature;
     bool is_in_main_chain;
     // The block containing this transaction is assumed valid
     bool is_assumed;

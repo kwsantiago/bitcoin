@@ -334,7 +334,13 @@ QString TransactionTableModel::formatTxStatus(const TransactionRecord *wtx) cons
         status = tr("Conflicted");
         break;
     case TransactionStatus::Immature:
-        status = tr("Immature (%1 confirmations, will be available after %2)").arg(wtx->status.depth).arg(wtx->status.depth + wtx->status.matures_in);
+        // matures_in counts blocks, which says nothing about an output held
+        // back by the rolling maturity period.
+        if (wtx->status.matures_in > 0) {
+            status = tr("Immature (%1 confirmations, will be available after %2)").arg(wtx->status.depth).arg(wtx->status.depth + wtx->status.matures_in);
+        } else {
+            status = tr("Immature (%1 confirmations)").arg(wtx->status.depth);
+        }
         break;
     case TransactionStatus::NotAccepted:
         status = tr("Generated but not accepted");
@@ -484,8 +490,11 @@ QVariant TransactionTableModel::txStatusDecoration(const TransactionRecord *wtx)
     case TransactionStatus::Conflicted:
         return QIcon(":/icons/transaction_conflicted");
     case TransactionStatus::Immature: {
-        int total = wtx->status.depth + wtx->status.matures_in;
-        int part = (wtx->status.depth * 4 / total) + 1;
+        const int total = wtx->status.depth + wtx->status.matures_in;
+        // Confirmed as far as depth goes, so show it as such; the status text
+        // carries the reason it is not spendable yet.
+        if (wtx->status.matures_in <= 0 || total <= 0) return QIcon(":/icons/transaction_5");
+        const int part = (wtx->status.depth * 4 / total) + 1;
         return QIcon(QString(":/icons/transaction_%1").arg(part));
         }
     case TransactionStatus::NotAccepted:

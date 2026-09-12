@@ -116,6 +116,7 @@ WalletTxStatus MakeWalletTxStatus(const CWallet& wallet, const CWalletTx& wtx)
     result.is_trusted = CachedTxIsTrusted(wallet, wtx);
     result.is_abandoned = wtx.isAbandoned();
     result.is_coinbase = wtx.IsCoinBase();
+    result.is_immature = wallet.IsTxImmatureCoinBase(wtx);
     result.is_in_main_chain = wtx.isConfirmed();
     result.is_assumed = wallet.IsTxAssumed(wtx);
     return result;

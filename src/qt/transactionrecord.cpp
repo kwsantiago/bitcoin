@@ -169,13 +169,13 @@ void TransactionRecord::updateStatus(const interfaces::WalletTxStatus& wtx, cons
         wtx.time_received,
         idx,
         typesort);
-    status.countsForBalance = wtx.is_trusted && !(wtx.blocks_to_maturity > 0);
+    status.countsForBalance = wtx.is_trusted && !wtx.is_immature;
     status.depth = wtx.depth_in_main_chain;
     status.m_cur_block_hash = block_hash;
 
     // For generated transactions, determine maturity
     if (type == TransactionRecord::Generated) {
-        if (wtx.blocks_to_maturity > 0)
+        if (wtx.is_immature)
         {
             status.status = TransactionStatus::Immature;
 

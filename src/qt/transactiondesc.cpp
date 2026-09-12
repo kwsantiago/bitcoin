@@ -189,10 +189,16 @@ QString TransactionDesc::toHTML(interfaces::Node& node, interfaces::Wallet& wall
         for (const CTxOut& txout : wtx.tx->vout)
             nUnmatured += wallet.getCredit(txout, ISMINE_ALL);
         strHTML += "<b>" + tr("Credit") + ":</b> ";
-        if (status.is_in_main_chain)
-            strHTML += BitcoinUnits::formatHtmlWithUnit(font_for_money, unit, nUnmatured)+ " (" + tr("matures in %n more block(s)", "", status.blocks_to_maturity) + ")";
-        else
+        if (status.is_in_main_chain) {
+            strHTML += BitcoinUnits::formatHtmlWithUnit(font_for_money, unit, nUnmatured);
+            // blocks_to_maturity counts blocks, so it says nothing about an
+            // output held back only by the rolling maturity period.
+            if (status.blocks_to_maturity > 0) {
+                strHTML += " (" + tr("matures in %n more block(s)", "", status.blocks_to_maturity) + ")";
+            }
+        } else {
             strHTML += "(" + tr("not accepted") + ")";
+        }
         strHTML += "<br>";
     }
     else if (nNet > 0)
