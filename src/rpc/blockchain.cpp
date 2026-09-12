@@ -1913,9 +1913,10 @@ RPCHelpMan getblockchaininfo()
 namespace {
 const std::vector<RPCResult> RPCHelpForDeployment{
     {RPCResult::Type::STR, "type", "one of \"buried\", \"bip9\", \"flagday\""},
-    {RPCResult::Type::NUM, "height", /*optional=*/true, "height of the first block which enforces the rules (only for \"buried\" and \"flagday\" types, or \"bip9\" type with \"active\" status; for \"flagday\" this is the BLAKE2b hardfork height)"},
+    {RPCResult::Type::NUM, "height", /*optional=*/true, "height of the first block which enforces the rules (only for \"buried\" and \"flagday\" types, or \"bip9\" type with \"active\" status; for \"flagday\" this is the deployment's own activation height)"},
     {RPCResult::Type::NUM, "height_end", /*optional=*/true, "height of the last block which enforces the rules (only for \"bip9\" type with \"active\" status and temporary deployments)"},
     {RPCResult::Type::BOOL, "active", "true if the rules are enforced for the mempool and the next block (the mempool applies the RDTS rules regardless of this flag)"},
+    {RPCResult::Type::NUM, "maturity_seconds", /*optional=*/true, "seconds a generation output must age before it can be spent; only outputs created at or after \"height\" are covered (only for \"rolling_coinbase_maturity\")"},
     {RPCResult::Type::NUM_TIME, "expiry_time", /*optional=*/true, "median time past at and after which the rules are no longer enforced (only for \"flagday\" type; a block is past expiry when its parent's median time past has reached this value)"},
     {RPCResult::Type::OBJ, "bip9", /*optional=*/true, "status of bip9 softforks (only for \"bip9\" type)",
     {
@@ -1962,6 +1963,21 @@ void RdtsFlagDayDescPushBack(const CBlockIndex* blockindex, UniValue& softforks,
     softforks.pushKV("reduced_data", std::move(rv));
 }
 
+void RollingMaturityDescPushBack(const CBlockIndex* blockindex, UniValue& softforks, const ChainstateManager& chainman)
+{
+    const Consensus::Params& params{chainman.GetConsensus()};
+    if (!params.IsRollingCoinbaseMaturityScheduled() ||
+        params.RdtsExpiryTime == std::numeric_limits<int64_t>::min()) return;
+
+    UniValue rv(UniValue::VOBJ);
+    rv.pushKV("type", "flagday");
+    rv.pushKV("height", params.CoinbaseMaturityRollingHeight);
+    rv.pushKV("expiry_time", params.RdtsExpiryTime);
+    rv.pushKV("maturity_seconds", params.CoinbaseMaturitySeconds);
+    rv.pushKV("active", params.RollingCoinbaseMaturityActiveAt(blockindex->nHeight + 1, blockindex->GetMedianTimePast()));
+    softforks.pushKV("rolling_coinbase_maturity", std::move(rv));
+}
+
 UniValue DeploymentInfo(const CBlockIndex* blockindex, const ChainstateManager& chainman)
 {
     UniValue softforks(UniValue::VOBJ);
@@ -1973,6 +1989,7 @@ UniValue DeploymentInfo(const CBlockIndex* blockindex, const ChainstateManager& 
     SoftForkDescPushBack(blockindex, softforks, chainman, Consensus::DEPLOYMENT_TESTDUMMY);
     SoftForkDescPushBack(blockindex, softforks, chainman, Consensus::DEPLOYMENT_TAPROOT);
     RdtsFlagDayDescPushBack(blockindex, softforks, chainman);
+    RollingMaturityDescPushBack(blockindex, softforks, chainman);
     return softforks;
 }
 } // anon namespace
