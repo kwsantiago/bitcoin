@@ -123,6 +123,19 @@ struct Params {
      * behaviour is unchanged on chains that do not set it.
      */
     int64_t RdtsExpiryTime{std::numeric_limits<int64_t>::min()};
+    /**
+     * Temporary coinbase spend freeze: no transaction may spend a coinbase
+     * output at any depth from the block whose parent median-time-past has
+     * reached this value until RDTS expires. Both boundaries use the parent's
+     * median-time-past, so the window is monotone along any chain.
+     *
+     * The window only borrows the RDTS expiry instant; it is deliberately not
+     * gated on Blake2bHeight, so a chain that schedules a start before the
+     * hardfork gets the freeze without RDTS. Whoever schedules this must keep
+     * the start below RdtsExpiryTime or the window is empty and the rule is
+     * silently inert. The default leaves it unscheduled.
+     */
+    int64_t CoinbaseFreezeStartTime{std::numeric_limits<int64_t>::max()};
     /** Don't warn about unknown BIP 9 activations below this height.
      * This prevents us from warning about the CSV and segwit activations. */
     int MinBIP9WarningHeight;
@@ -194,6 +207,21 @@ struct Params {
     bool RdtsActiveAt(int height, int64_t mtp_prev) const
     {
         return IsBlake2bHeight(height) && mtp_prev < RdtsExpiryTime;
+    }
+
+    /** Whether the coinbase spend freeze is scheduled at all. Callers check
+     *  this before computing a median-time-past to pass to the predicate
+     *  below, which keeps the rule free on chains that do not schedule it. */
+    bool IsCoinbaseFreezeScheduled() const
+    {
+        return CoinbaseFreezeStartTime != std::numeric_limits<int64_t>::max();
+    }
+
+    /** Whether the coinbase spend freeze applies to a block whose parent has
+     *  the given median-time-past. */
+    bool CoinbaseFreezeActiveAt(int64_t mtp_prev) const
+    {
+        return mtp_prev >= CoinbaseFreezeStartTime && mtp_prev < RdtsExpiryTime;
     }
 };
 
